@@ -1,0 +1,15 @@
+[
+  {
+    "id": 1742915220815,
+    "trigger": "teste",
+    "response": "teste2",
+    "priority": "high",
+    "createdAt": "2025-03-25T15:07:00.815Z"
+  },
+  {
+    "id": 1742916756730,
+    "trigger": "teste3",
+    "response": "teste4",
+    "createdAt": "2025-03-25T15:32:36.730Z"
+  }
+]
