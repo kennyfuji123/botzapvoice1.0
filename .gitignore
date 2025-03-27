@@ -1,1 +1,8 @@
-node_modules
+./node_modules
+./dist
+./build
+/.wwebjs_auth
+/.wwebjs_cache
+backend/node_modules
+backend/.wwebjs_auth
+backend/.wwebjs_cache
