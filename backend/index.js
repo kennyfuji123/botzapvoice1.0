@@ -1,8 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
 const fs = require('fs');
+const path = require('path');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
 const app = express();
@@ -26,11 +27,39 @@ ensureAIConfigFile();
 
 console.log('Iniciando cliente WhatsApp...');
 
+// Função para limpar diretório de forma recursiva
+const clearDirectory = (dir) => {
+  if (fs.existsSync(dir)) {
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      if (fs.lstatSync(filePath).isDirectory()) {
+        clearDirectory(filePath);
+      } else {
+        fs.unlinkSync(filePath);
+      }
+    }
+    fs.rmdirSync(dir);
+  }
+};
+
+// Modificar a inicialização do cliente
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({
+    clientId: 'whatsapp-client',
+    dataPath: path.join(__dirname, '.wwebjs_auth'),
+    onLogout: async () => {
+      try {
+        const sessionPath = path.join(__dirname, '.wwebjs_auth');
+        clearDirectory(sessionPath);
+        console.log('Sessão limpa com sucesso');
+      } catch (error) {
+        console.error('Erro ao limpar sessão:', error);
+      }
+    }
+  }),
   puppeteer: {
-    args: ['--no-sandbox'],
-    headless: true
+    args: ['--no-sandbox']
   }
 });
 
@@ -39,8 +68,8 @@ let qrCodeData = null;
 client.on('qr', async (qr) => {
   console.log('QR Code recebido, gerando imagem...');
   try {
-    qrCodeData = await qrcode.toDataURL(qr);
-    console.log('QR Code gerado com sucesso');
+    qrCodeData = await QRCode.toDataURL(qr);
+    console.log('QR Code gerado com sucesso!');
   } catch (error) {
     console.error('Erro ao gerar QR Code:', error);
   }
@@ -90,29 +119,61 @@ client.on('message', async msg => {
     if (aiConfig.isAIEnabled) {
       console.log('Nenhuma mensagem automática encontrada, usando IA...');
       try {
+        // Carregar contexto do negócio
+        const businessContext = JSON.parse(fs.readFileSync('businessContext.json', 'utf8'));
+
+        console.log('Fazendo requisição para a IA...');
         const response = await fetch('http://localhost:11434/api/generate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: "neural-chat",
-            prompt: `Você é um assistente virtual amigável e prestativo. Responda de forma concisa e natural.
-            Pergunta: ${msg.body}`,
+            model: "mistral",
+            prompt: `Você é um assistente virtual especializado em atendimento ao cliente da ${businessContext.businessName}. 
+            Suas características são:
+            - Sempre responda em português
+            - Seja amigável e prestativo
+            - Use linguagem informal e descontraída
+            - Mantenha as respostas concisas e diretas
+            - Se não souber algo, seja honesto e diga que não sabe
+            - Use emojis ocasionalmente para tornar a conversa mais amigável
+            - Seja profissional mas não formal
+            - Evite respostas muito longas
+            - Mantenha um tom positivo e otimista
+            
+            Informações importantes sobre o negócio:
+            - Horário de funcionamento: ${businessContext.businessHours}
+            - Produtos principais: ${businessContext.mainProducts.join(', ')}
+            - Serviços principais: ${businessContext.mainServices.join(', ')}
+            - Taxa de entrega: ${businessContext.pricingInfo.deliveryFee}
+            - Pedido mínimo: ${businessContext.pricingInfo.minimumOrder}
+            
+            Pergunta do cliente: ${msg.body}`,
             stream: false
           }),
         });
 
         if (!response.ok) {
-          throw new Error('Erro ao obter resposta da IA');
+          const errorText = await response.text();
+          console.error('Resposta não OK da IA:', response.status, errorText);
+          throw new Error(`Erro ao obter resposta da IA: ${response.status} ${errorText}`);
         }
 
         const data = await response.json();
+        console.log('Resposta bruta da IA:', data);
+
+        if (!data.response) {
+          throw new Error('Resposta da IA não contém o campo response');
+        }
+
         const aiResponse = data.response;
-        console.log('Resposta da IA:', aiResponse);
+        console.log('Resposta processada da IA:', aiResponse);
+
         await msg.reply(aiResponse);
       } catch (error) {
-        console.error('Erro ao chamar IA:', error);
+        console.error('Erro detalhado ao chamar IA:', error);
+        await msg.reply('Desculpe, tive um problema ao processar sua mensagem. Por favor, tente novamente em alguns instantes.');
       }
     } else {
       console.log('IA desativada e nenhuma mensagem automática encontrada - nenhuma resposta será enviada');
@@ -133,7 +194,7 @@ app.post('/api/initialize', (req, res) => {
   console.log('Requisição de inicialização recebida');
   if (qrCodeData) {
     console.log('Enviando QR Code');
-    res.json({ qrCode: qrCodeData });
+    res.json({ qrCode: qrCodeData, status: 'pending' });
   } else {
     console.log('Cliente já conectado');
     res.json({ status: 'connected' });
@@ -174,32 +235,63 @@ app.post('/api/send-message', async (req, res) => {
     }
 
     // Se não houver mensagem automática, usar a IA
+    console.log('Fazendo requisição para a IA...');
+
+    // Carregar contexto do negócio
+    const businessContext = JSON.parse(fs.readFileSync('businessContext.json', 'utf8'));
+
     const response = await fetch('http://localhost:11434/api/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: "neural-chat",
-        prompt: `Você é um assistente virtual amigável e prestativo. Responda de forma concisa e natural.
-        Pergunta: ${message}`,
+        model: "mistral",
+        prompt: `Você é um assistente virtual especializado em atendimento ao cliente da ${businessContext.businessName}. 
+        Suas características são:
+        - Sempre responda em português
+        - Seja amigável e prestativo
+        - Use linguagem informal e descontraída
+        - Mantenha as respostas concisas e diretas
+        - Se não souber algo, seja honesto e diga que não sabe
+        - Use emojis ocasionalmente para tornar a conversa mais amigável
+        - Seja profissional mas não formal
+        - Evite respostas muito longas
+        - Mantenha um tom positivo e otimista
+        
+        Informações importantes sobre o negócio:
+        - Horário de funcionamento: ${businessContext.businessHours}
+        - Produtos principais: ${businessContext.mainProducts.join(', ')}
+        - Serviços principais: ${businessContext.mainServices.join(', ')}
+        - Taxa de entrega: ${businessContext.pricingInfo.deliveryFee}
+        - Pedido mínimo: ${businessContext.pricingInfo.minimumOrder}
+        
+        Pergunta do cliente: ${message}`,
         stream: false
       }),
     });
 
     if (!response.ok) {
-      throw new Error('Erro ao obter resposta da IA');
+      const errorText = await response.text();
+      console.error('Resposta não OK da IA:', response.status, errorText);
+      throw new Error(`Erro ao obter resposta da IA: ${response.status} ${errorText}`);
     }
 
     const data = await response.json();
+    console.log('Resposta bruta da IA:', data);
+
+    if (!data.response) {
+      throw new Error('Resposta da IA não contém o campo response');
+    }
+
     const aiResponse = data.response;
-    console.log('Resposta da IA:', aiResponse);
+    console.log('Resposta processada da IA:', aiResponse);
 
     // Enviar resposta da IA
     await client.sendMessage(formattedNumber, aiResponse);
     res.json({ success: true, message: 'Mensagem enviada com sucesso' });
   } catch (error) {
-    console.error('Erro ao enviar mensagem:', error);
+    console.error('Erro detalhado ao enviar mensagem:', error);
     res.status(500).json({ error: error.message });
   }
 });
