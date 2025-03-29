@@ -11,5 +11,12 @@
     "trigger": "teste3",
     "response": "teste4",
     "createdAt": "2025-03-25T15:32:36.730Z"
+  },
+  {
+    "id": 1743129353917,
+    "trigger": "oi",
+    "type": "audio",
+    "audioFile": "intro_data_fifa.ogg",
+    "createdAt": "2025-03-28T02:35:53.917Z"
   }
 ]

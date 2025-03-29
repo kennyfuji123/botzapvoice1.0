@@ -5,6 +5,7 @@ const QRCode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
+const { MessageMedia } = require('whatsapp-web.js');
 
 const app = express();
 app.use(cors());
@@ -108,6 +109,32 @@ client.on('message', async msg => {
 
     if (autoMessage) {
       console.log('Enviando mensagem automática:', autoMessage.response);
+      
+      // Verificar se é uma resposta em áudio
+      if (autoMessage.type === 'audio' && autoMessage.audioFile) {
+        const audioPath = path.join(__dirname, 'audios', autoMessage.audioFile);
+        if (fs.existsSync(audioPath)) {
+          try {
+            const media = MessageMedia.fromFilePath(audioPath);
+            // Enviar como mensagem de voz nativa
+            await client.sendMessage(msg.from, media, {
+              sendMediaAsVoice: true,
+              caption: autoMessage.response || '',
+              mimetype: 'audio/ogg; codecs=opus'
+            });
+            return;
+          } catch (error) {
+            console.error('Erro ao enviar mensagem de voz:', error);
+            await msg.reply('Desculpe, houve um erro ao processar o áudio.');
+            return;
+          }
+        } else {
+          console.error('Arquivo de áudio não encontrado:', audioPath);
+          await msg.reply('Desculpe, houve um erro ao processar o áudio.');
+          return;
+        }
+      }
+      
       await msg.reply(autoMessage.response);
       return;
     }
